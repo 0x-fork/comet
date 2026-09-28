@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 const source = readFileSync(new URL('./public/downloads.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('./public/index.html', import.meta.url), 'utf8');
 async function load(navigator, version = '0.2.98', fail = false) {
-  const links = Object.fromEntries(['nav-download', 'hero-download', 'closing-download', 'ver'].map(id => [id, { href: '#downloads', setAttribute() {} }]));
+  const links = Object.fromEntries(['nav-download', 'hero-download', 'closing-download'].map(id => [id, { href: '#downloads', setAttribute() {} }]));
   const choices = ['macos', 'windows', 'windows-portable', 'linux', 'linux-arm'].map(platformDownload => ({ dataset: { platformDownload } }));
   runInNewContext(source, { navigator, document: { getElementById: id => links[id], querySelectorAll: () => choices }, fetch: () => fail ? Promise.reject() : Promise.resolve({ ok: true, text: () => Promise.resolve(version) }) });
   await new Promise(resolve => setImmediate(resolve));
