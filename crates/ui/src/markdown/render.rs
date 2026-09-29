@@ -1005,12 +1005,25 @@ fn flatten_runs_weighted(runs: &[InlineRun], theme: &Theme, base_weight: FontWei
     let mut out: Vec<TextRun> = Vec::with_capacity(runs.len());
     let mut links: Vec<(Range<usize>, String)> = Vec::new();
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
+    // A run may stand for a longer source text than it shows (a file link
+    // labeled by its file name). The source is only kept when some run does.
+    let relabeled = runs.iter().any(|run| run.style.file_label.is_some());
+    let mut source = String::new();
+    let mut omissions: Vec<(Range<usize>, Range<usize>)> = Vec::new();
     for run in runs {
         if run.text.is_empty() {
             continue;
         }
+        let shown = run.style.file_label.as_deref().unwrap_or(&run.text);
         let start = text.len();
-        text.push_str(&run.text);
+        text.push_str(shown);
+        if relabeled {
+            let source_start = source.len();
+            source.push_str(&run.text);
+            if shown != run.text.as_str() {
+                omissions.push((source_start..source.len(), start..text.len()));
+            }
+        }
         let mut f = if run.style.code {
             font(theme.font_mono.clone())
         } else {
@@ -1059,7 +1072,7 @@ fn flatten_runs_weighted(runs: &[InlineRun], theme: &Theme, base_weight: FontWei
             }
         }
         out.push(TextRun {
-            len: run.text.len(),
+            len: shown.len(),
             font: f,
             color,
             // Inline code's wash is painted as ROUNDED quads by the canvas
@@ -1078,7 +1091,15 @@ fn flatten_runs_weighted(runs: &[InlineRun], theme: &Theme, base_weight: FontWei
         });
     }
     FlatText {
-        original: None,
+        // The source survives for copy and selection only where a label
+        // actually replaced text.
+        original: (!omissions.is_empty()).then(|| super::link_presentation::OriginalText {
+            text: source.into(),
+            offsets: super::link_presentation::OffsetMap {
+                omissions,
+                prior: None,
+            },
+        }),
         text: text.into(),
         runs: out,
         links,
@@ -2667,6 +2688,63 @@ mod tests {
             },
         }];
         assert_eq!(sole_workspace_file_link(&unresolved, "/work/comet"), None);
+    }
+
+    #[test]
+    fn a_file_label_shows_in_place_of_the_path_which_stays_the_copy_source() {
+        let path = "2026-09-29/Some Long Folder Name/SOURCES.md";
+        let linked = InlineRun {
+            text: path.into(),
+            style: InlineStyle {
+                link: Some(path.into()),
+                file_label: Some("SOURCES.md".into()),
+                ..Default::default()
+            },
+        };
+        // A whole line or list item still gets the file row's icon identity.
+        assert_eq!(
+            sole_file_reference(std::slice::from_ref(&linked), "/work/comet"),
+            Some(path.into())
+        );
+
+        let sentence = vec![
+            InlineRun {
+                text: "See ".into(),
+                style: InlineStyle::default(),
+            },
+            linked,
+            InlineRun {
+                text: " next.".into(),
+                style: InlineStyle::default(),
+            },
+        ];
+        let flat = flatten_runs(&sentence, &Theme::dark(), false);
+        assert_eq!(flat.text.as_ref(), "See SOURCES.md next.");
+        assert_eq!(flat.links, vec![(4..14, path.to_owned())]);
+        assert_eq!(
+            flat.runs.iter().map(|run| run.len).sum::<usize>(),
+            flat.text.len()
+        );
+        let original = flat.original.expect("the path is kept for copy");
+        assert_eq!(original.text.as_ref(), format!("See {path} next."));
+        // Selecting the whole label copies the whole path; the prose around
+        // it maps one to one.
+        let offsets = &original.offsets;
+        assert_eq!(offsets.original(4), 4);
+        assert_eq!(offsets.original(14), 4 + path.len());
+        assert_eq!(offsets.original(flat.text.len()), original.text.len());
+        assert_eq!(offsets.displayed(4 + path.len() + 1), 15);
+    }
+
+    #[test]
+    fn an_authored_file_link_label_is_never_replaced_by_the_file_name() {
+        let tree = parse_full("[docs/a.md](docs/a.md)");
+        let Block::Paragraph { runs } = &tree.blocks[0].block else {
+            panic!("expected a paragraph");
+        };
+        let flat = flatten_runs(runs, &Theme::dark(), false);
+        assert_eq!(flat.text.as_ref(), "docs/a.md");
+        assert!(flat.original.is_none(), "the authored label is the source");
     }
 
     #[test]
