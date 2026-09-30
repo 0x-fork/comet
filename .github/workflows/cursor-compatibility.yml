@@ -9,6 +9,16 @@ on:
       - 'Cargo.lock'
       - 'scripts/*cursor-sdk*'
       - '.github/workflows/cursor-*.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/harness/**'
+      - 'crates/doc/**'
+      - 'crates/engine/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/*cursor-sdk*'
+      - '.github/workflows/cursor-*.yml'
   workflow_dispatch:
   workflow_call:
 permissions:
@@ -23,6 +33,9 @@ jobs:
         with:
           node-version: '22'
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       - name: Dependency updater validation
         run: python3 scripts/test-update-cursor-sdk.py
       - name: Install the exact SDK selected by this engine
