@@ -16,6 +16,7 @@
 #                  they are listed instead of globbed to avoid compiling them.
 # nextest does not run doctests; these crates have none (their doc comments
 # contain no Rust code blocks).
+# Extra arguments are passed to nextest (the nightly job adds `--release`).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -30,4 +31,4 @@ done
 exec cargo nextest run --config-file scripts/ci/nextest.toml --locked --no-fail-fast \
   -p zeron-harness -p zeron-engine -p zeron-sync -p zeron-update -p zeron-doc -p zeron-preview \
   --features zeron-harness/native-fixture \
-  --lib --bins "${tests[@]}"
+  --lib --bins "${tests[@]}" "$@"
