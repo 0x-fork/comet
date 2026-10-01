@@ -80,7 +80,7 @@ jobs:
   # Updater and preview tests, native UI regressions and the two native WebKit fixtures. Everything is
   # compiled once (one cargo invocation, so dependencies are built once) and then run.
   macos-native:
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -158,7 +158,7 @@ jobs:
 
   # gpui_macos lives in the pinned GPUI checkout, a separate workspace with its own cache.
   macos-frame-source:
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -225,7 +225,7 @@ jobs:
   ios-tests:
     needs: [changes, ios-core, macos-frame-source]
     if: needs.changes.outputs.ios == 'true'
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
