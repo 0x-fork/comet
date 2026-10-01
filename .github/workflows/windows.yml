@@ -63,7 +63,9 @@ jobs:
           $headlessResult = $LASTEXITCODE
           if ($nativeResult -ne 0 -or $headlessResult -ne 0) { exit 1 }
 
-  crate-tests:
+  # The crate suites compile different package sets, so the two jobs below each
+  # build what they need in parallel instead of one job building them in turn.
+  harness-app-tests:
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -75,6 +77,13 @@ jobs:
         run: cargo test --release --locked -p gpui_windows --lib layout
       - name: Application and updater tests
         run: cargo test --release --locked -p zeron -p zeron-update
+
+  engine-tests:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/windows-ci-setup
       - name: Engine unit tests
         run: cargo test --release --locked -p zeron-engine --lib
       - name: Harness catalog and login tests
