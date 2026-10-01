@@ -4,10 +4,9 @@
 # untouched; only the wrapper changes:
 #  * bounded retries: each attempt has its own timeout (instead of one long hang) and a failed attempt
 #    is reported with a ::warning:: so flakes stay visible. A real regression fails every attempt.
-#  * PREVIEW_HOSTS=1 (preview fixture only): WebKit sometimes fails to resolve *.localhost
-#    (NSURLErrorDomain -1003) although the preview proxy is listening; map the fixture hostnames to
-#    loopback in /etc/hosts so DNS can never be the reason. The fixture still goes through the same
-#    per-domain proxy path; this only removes the DNS race.
+# The preview fixture deliberately gets no /etc/hosts entries: the app routes *.localhost preview
+# hostnames through WebKit's per-domain proxy, and an NSURLErrorDomain -1003 means that path failed,
+# which is what the fixture exists to catch.
 # usage: run-macos-fixture.sh <fixture-binary> <capture-dir>
 set -uo pipefail
 ROOT="${ZERON_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
@@ -15,16 +14,6 @@ BINARY="$1"
 OUT="$2"
 ATTEMPTS="${FIXTURE_ATTEMPTS:-3}"
 ATTEMPT_TIMEOUT="${FIXTURE_ATTEMPT_TIMEOUT:-70}"
-
-if [ -n "${PREVIEW_HOSTS:-}" ]; then
-  # Same slug() as crates/preview/src/catalog.rs: device label = slug(hostname).
-  label=$(hostname | python3 -c 'import re,sys; s=re.sub(r"[^a-z0-9]+","-",sys.stdin.read().strip().lower()).strip("-")[:48].strip("-"); print(s or "project")')
-  for svc in fieldnotes fieldnotes-vite fieldnotes-api fieldnotes-node fieldnotes-web fieldnotes-server; do
-    echo "127.0.0.1 $label.$svc.localhost"
-    echo "::1 $label.$svc.localhost"
-  done | sudo tee -a /etc/hosts >/dev/null
-  echo "hosts entries added for device label '$label'"
-fi
 
 # macOS has no coreutils `timeout`; do it in bash.
 run_with_timeout() {
@@ -47,10 +36,8 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
     exit 0
   fi
   echo "::warning::$(basename "$BINARY") attempt $attempt failed"
-  if [ -n "${PREVIEW_HOSTS:-}" ]; then
-    dscacheutil -q host -a name "$label.fieldnotes.localhost" || true
-    lsof -nP -iTCP:7331 -sTCP:LISTEN || true
-  fi
+  # Is the preview proxy listening? (Nothing for the browser fixture.)
+  lsof -nP -iTCP:7331 -sTCP:LISTEN || true
   mkdir -p "$OUT.failed-$attempt"
   cp -R "$OUT"/. "$OUT.failed-$attempt"/ 2>/dev/null || true
   pkill -f 'vite/bin/vite.js' 2>/dev/null || true

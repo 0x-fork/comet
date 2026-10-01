@@ -97,14 +97,14 @@ jobs:
           # Pinned release, verified against a checksum.
           version=0.9.146
           sha256=39785160b3c2f6ed9a765049cf4fa79f3b39aa02eb7598a5a0e2a1a0b9ffb9a8
-          curl -fsSL -o "$RUNNER_TEMP/nextest.tar.gz" \
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 5 -o "$RUNNER_TEMP/nextest.tar.gz" \
             "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$version/cargo-nextest-$version-universal-apple-darwin.tar.gz"
           echo "$sha256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 -c -
-          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$HOME/.cargo/bin"
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$HOME/.cargo/bin" cargo-nextest
       - name: Build tests and fixtures
         run: |
           cargo nextest run --no-run --locked \
-            -p zeron-update -p zeron-preview -p zeron-ui \
+            -p zeron-update -p zeron-preview -p zeron-ui -p zeron-text \
             --features zeron-ui/browser-fixture --lib --tests
           cargo build --locked -p zeron-update -p zeron-preview -p zeron-ui \
             --features zeron-ui/browser-fixture --example browser-fixture --example preview-fixture
@@ -113,12 +113,14 @@ jobs:
           # Match the old `cargo check --release`: no debug assertions.
           CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: false
         run: cargo check --locked -p zeron
-      - name: Updater, preview and native UI regressions
+      - name: Updater, preview, CoreText and native UI regressions
         run: |
+          # zeron-text's coretext tests are macOS-only (#![cfg(target_os = "macos")]); its other
+          # tests run on Linux in ios-core.
           cargo nextest run --no-fail-fast --locked \
-            -p zeron-update -p zeron-preview -p zeron-ui \
+            -p zeron-update -p zeron-preview -p zeron-ui -p zeron-text \
             --features zeron-ui/browser-fixture --lib --tests \
-            -E 'package(zeron-update) | package(zeron-preview) | (binary_id(zeron-ui) & (test(native_diff_font_geometry) | test(/notify::tests::/)))'
+            -E 'package(zeron-update) | package(zeron-preview) | binary_id(zeron-text::coretext) | (binary_id(zeron-ui) & (test(native_diff_font_geometry) | test(/notify::tests::/)))'
       - name: Native browser regression and screenshots
         timeout-minutes: 7
         env:
@@ -143,7 +145,6 @@ jobs:
         timeout-minutes: 5
         env:
           ZERON_PREVIEW_AUTO_OPEN: 1
-          PREVIEW_HOSTS: 1
         run: |
           VITE_BINARY="$GITHUB_WORKSPACE/edge/node_modules/vite/bin/vite.js" scripts/ci/run-macos-fixture.sh target/debug/examples/preview-fixture "$RUNNER_TEMP/preview-captures"
           test -f "$RUNNER_TEMP/preview-captures/result.txt"
