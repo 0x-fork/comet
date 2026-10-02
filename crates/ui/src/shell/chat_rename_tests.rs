@@ -372,3 +372,30 @@ fn rename_expands_a_collapsed_custom_section(cx: &mut TestAppContext) {
     });
     assert!(cx.debug_bounds("chat-title-editor-older").is_some());
 }
+
+#[gpui::test]
+fn inline_rename_keeps_the_row_height_in_compact_and_full_rows(cx: &mut TestAppContext) {
+    let (shell, cx) = setup(cx);
+    for compact in [true, false] {
+        shell.update(cx, |shell, cx| {
+            shell.settings.sidebar_compact = compact;
+            cx.notify();
+        });
+        redraw(cx);
+        let row = cx.debug_bounds("chat-older").unwrap();
+        double_click(cx, row.center());
+
+        // The field takes the title's place without growing the row.
+        let field = cx.debug_bounds("chat-title-editor-older").unwrap();
+        assert!(row.contains(&field.center()), "compact: {compact}");
+        assert_eq!(
+            cx.debug_bounds("chat-older").unwrap().size.height,
+            row.size.height,
+            "compact: {compact}"
+        );
+
+        cx.simulate_keystrokes("escape");
+        redraw(cx);
+        assert!(shell.read_with(cx, |shell, _| shell.chat_rename.is_none()));
+    }
+}
