@@ -51,6 +51,6 @@ Zeron をスポンサーしてくださっている [The Context Company](https:
 
 ---
 
-開発に参加したい方や仕組みが気になる方は、[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/zeronsh/zeron) または [ARCHITECTURE.md](ARCHITECTURE.md) をご覧ください。
+開発に参加したい方や仕組みが気になる方は、[Ask DeepWiki](https://deepwiki.com/zeronsh/zeron) または [ARCHITECTURE.md](ARCHITECTURE.md) をご覧ください。
 
 [MIT License](LICENSE) のもとで公開されています。

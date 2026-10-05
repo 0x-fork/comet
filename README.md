@@ -51,6 +51,6 @@ Thank you to [The Context Company](https://www.thecontextcompany.com/) for spons
 
 ---
 
-Developing or curious how it works? [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/zeronsh/zeron) or check out [ARCHITECTURE.md](ARCHITECTURE.md).
+Developing or curious how it works? [Ask DeepWiki](https://deepwiki.com/zeronsh/zeron) or check out [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Licensed under the [MIT License](LICENSE).

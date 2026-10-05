@@ -51,6 +51,6 @@ Zeron을 후원해 주신 [The Context Company](https://www.thecontextcompany.co
 
 ---
 
-개발에 참여하고 싶거나 동작 방식이 궁금하다면 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/zeronsh/zeron) 또는 [ARCHITECTURE.md](ARCHITECTURE.md)를 확인하세요.
+개발에 참여하고 싶거나 동작 방식이 궁금하다면 [Ask DeepWiki](https://deepwiki.com/zeronsh/zeron) 또는 [ARCHITECTURE.md](ARCHITECTURE.md)를 확인하세요.
 
 [MIT License](LICENSE)로 배포됩니다.
