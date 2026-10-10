@@ -1327,7 +1327,7 @@ impl PullRequestsPage {
                         };
                         let id = format!("pr-project-{}", space.id);
                         let selector = id.clone();
-                        let row = popover::menu_row(theme, selected, id.clone())
+                        let row = popover::picker_row(theme, selected, false, id.clone())
                             .id(SharedString::from(id))
                             .debug_selector(move || selector.clone())
                             .role(gpui::Role::Button)
@@ -1376,27 +1376,15 @@ impl PullRequestsPage {
                                             .child(secondary),
                                     )),
                             )
-                            .child(
-                                div()
-                                    .size(px(16.0))
-                                    .flex_none()
-                                    .when(loading, |el| {
-                                        el.child(crate::loaders::mini_glyph_spinner(
-                                            "pr-project-resolving",
-                                            1.5,
-                                            theme.glyph,
-                                            cx.entity_id(),
-                                            cx,
-                                        ))
-                                    })
-                                    .when(!loading && selected, |el| {
-                                        el.child(
-                                            icon(icons::CHECK)
-                                                .size(px(16.0))
-                                                .text_color(theme.text_muted),
-                                        )
-                                    }),
-                            )
+                            .child(div().size(px(16.0)).flex_none().when(loading, |el| {
+                                el.child(crate::loaders::mini_glyph_spinner(
+                                    "pr-project-resolving",
+                                    1.5,
+                                    theme.glyph,
+                                    cx.entity_id(),
+                                    cx,
+                                ))
+                            }))
                             .on_click(cx.listener(move |page, _, _, cx| {
                                 cx.stop_propagation();
                                 page.select_project(
@@ -1423,7 +1411,7 @@ impl PullRequestsPage {
                         .as_ref()
                         .is_some_and(|current| current.eq_ignore_ascii_case(&repo));
                     group = group.child(
-                        popover::menu_row(theme, selected, format!("pr-recent-{repo}"))
+                        popover::picker_row(theme, selected, false, format!("pr-recent-{repo}"))
                             .id(SharedString::from(format!("pr-recent-{repo}")))
                             .debug_selector(|| "pr-recent-option".into())
                             .role(gpui::Role::Button)
@@ -1444,13 +1432,6 @@ impl PullRequestsPage {
                                 true,
                                 repo.clone(),
                             ))
-                            .child(div().size(px(16.0)).flex_none().when(selected, |el| {
-                                el.child(
-                                    icon(icons::CHECK)
-                                        .size(px(16.0))
-                                        .text_color(theme.text_muted),
-                                )
-                            }))
                             .on_click(cx.listener(move |page, _, _, cx| {
                                 cx.stop_propagation();
                                 page.return_focus = Some(page.repository_focus.clone());
@@ -1477,44 +1458,37 @@ impl PullRequestsPage {
                     .max(240.0)))
                 .flex()
                 .flex_col()
-                .gap(px(12.0))
                 .on_mouse_down_out(cx.listener(|page, _, _, cx| page.close_repository_menu(cx)))
                 .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.0))
+                    popover::search_row(theme)
+                        // The trailing button sits one card inset from the
+                        // edge, like the row's own text.
+                        .pr(px(popover::CARD_INSET + 2.0))
                         .child(
                             div()
-                                .flex()
-                                .items_center()
-                                .gap(px(6.0))
-                                .child(
-                                    crate::surface_chrome::input()
-                                        .min_w_0()
-                                        .flex_1()
-                                        .h(px(32.0))
-                                        .child(self.repository_input.clone()),
-                                )
-                                .child(
-                                    crate::surface_chrome::tab("pr-repository-load", false, theme)
-                                        .debug_selector(|| "pr-repository-load".into())
-                                        .h(px(32.0))
-                                        .px(px(10.0))
-                                        .flex_none()
-                                        .aria_label("Open repository")
-                                        .child("Open")
-                                        .on_click(cx.listener(|page, _, _, cx| {
-                                            cx.stop_propagation();
-                                            page.return_focus = Some(page.repository_focus.clone());
-                                            page.select_repository(cx);
-                                        })),
-                                ),
+                                .min_w_0()
+                                .flex_1()
+                                .child(self.repository_input.clone()),
                         )
-                        .when_some(self.repository_error.clone(), |el, error| {
-                            el.child(widgets::error_strip(theme, error))
-                        }),
+                        .child(
+                            crate::surface_chrome::tab("pr-repository-load", false, theme)
+                                .debug_selector(|| "pr-repository-load".into())
+                                .h(px(28.0))
+                                .px(px(10.0))
+                                .flex_none()
+                                .text_size(crate::typography::ui_rems(12.0))
+                                .aria_label("Open repository")
+                                .child("Open")
+                                .on_click(cx.listener(|page, _, _, cx| {
+                                    cx.stop_propagation();
+                                    page.return_focus = Some(page.repository_focus.clone());
+                                    page.select_repository(cx);
+                                })),
+                        ),
                 )
+                .when_some(self.repository_error.clone(), |el, error| {
+                    el.child(div().mb(px(8.0)).child(widgets::error_strip(theme, error)))
+                })
                 .when(!options.is_empty(), |el| {
                     el.child(
                         popover::menu_scroll_host("pr-repository-list-host")
@@ -2273,13 +2247,15 @@ impl PullRequestsPage {
         track_top: gpui::Pixels,
         pointer_y: gpui::Pixels,
     ) -> bool {
-        let Some(fraction) = popover::ScrollRailHost::rail_bar(self)
-            .drag_target_in(metrics, track_top, pointer_y)
+        let Some(fraction) =
+            popover::ScrollRailHost::rail_bar(self).drag_target_in(metrics, track_top, pointer_y)
         else {
             return false;
         };
-        self.board_list
-            .set_offset_from_scrollbar(gpui::Point::new(px(0.0), px(-fraction * metrics.max_scroll)));
+        self.board_list.set_offset_from_scrollbar(gpui::Point::new(
+            px(0.0),
+            px(-fraction * metrics.max_scroll),
+        ));
         true
     }
 }
@@ -2314,7 +2290,8 @@ impl popover::ScrollRailHost for PullRequestsPage {
         let Some((metrics, track_top)) = board_rail_geometry(&self.board_list) else {
             return false;
         };
-        self.rail_bar().begin_press_in(&metrics, track_top, pointer_y);
+        self.rail_bar()
+            .begin_press_in(&metrics, track_top, pointer_y);
         self.apply_board_rail_target(&metrics, track_top, pointer_y)
     }
     fn rail_drag_to(&mut self, pointer_y: gpui::Pixels) -> bool {
@@ -2641,7 +2618,11 @@ impl Render for PullRequestsPage {
                             let selected = self.personal_view == view;
                             // Toggle pills in the tray's material: filled, no
                             // outline, glyph and label centered together.
-                            let color = if selected { theme.text } else { theme.text_muted };
+                            let color = if selected {
+                                theme.text
+                            } else {
+                                theme.text_muted
+                            };
                             div()
                                 .id(id)
                                 .debug_selector(move || id.into())
@@ -2714,7 +2695,12 @@ impl Render for PullRequestsPage {
         let content = if board_list_active {
             None
         } else if initial_loading {
-            Some(crate::pull_request_skeleton::board(layout, cx.entity_id(), &theme, cx))
+            Some(crate::pull_request_skeleton::board(
+                layout,
+                cx.entity_id(),
+                &theme,
+                cx,
+            ))
         } else if self.items.is_empty() {
             Some(self.render_empty_or_error(&theme, cx))
         } else {
@@ -2766,8 +2752,11 @@ impl Render for PullRequestsPage {
                         .debug_selector(|| "pull-requests-scroll".into())
                         .size_full()
                         .child(
-                            list(self.board_list.clone(), cx.processor(Self::render_board_row))
-                                .size_full(),
+                            list(
+                                self.board_list.clone(),
+                                cx.processor(Self::render_board_row),
+                            )
+                            .size_full(),
                         ),
                 )
                 .fade_overflow_y_with(move |_| board_scroll_overflow(&overflow))

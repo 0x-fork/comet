@@ -6788,6 +6788,42 @@ impl Shell {
             .into_any_element()
     }
 
+    /// The sidebar's view options ride the titlebar at the sidebar's trailing
+    /// edge, sliding and fading with it as it collapses. They never cross
+    /// back over the control cluster on a narrow sidebar.
+    fn render_sidebar_options_titlebar(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let sidebar = self.sidebar_now();
+        let reveal = (sidebar / self.settings.sidebar_width.max(1.0)).clamp(0.0, 1.0);
+        if reveal <= 0.01 {
+            return None;
+        }
+        let cluster_end = self.eval_tween(
+            self.titlebar_tween,
+            cluster_buttons_start(
+                cfg!(target_os = "macos"),
+                self.fullscreen.unwrap_or(false),
+                self.linux_left_caption_count(),
+            ),
+        ) + CLUSTER_BUTTONS_WIDTH
+            + TITLEBAR_ACTION_SLOT_WIDTH * self.titlebar_plus_alpha(cx);
+        let left = (sidebar - Theme::SPACE_SM - 24.0).max(cluster_end + TITLEBAR_GROUP_GAP);
+        let theme = Theme::of(cx).clone();
+        let trigger = self.render_sidebar_view_trigger(&theme, cx);
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left(px(left))
+                .h(px(Theme::TITLEBAR_HEIGHT))
+                .pt(px(Theme::TITLEBAR_TOP_PAD))
+                .flex()
+                .items_center()
+                .opacity(reveal)
+                .child(trigger)
+                .into_any_element(),
+        )
+    }
+
     /// The titlebar owns new-session creation regardless of sidebar state. It
     /// remains available on PR screens, even without a selected session.
     pub(super) fn titlebar_plus_alpha(&self, cx: &App) -> f32 {
@@ -13643,6 +13679,7 @@ impl Render for Shell {
                     // the cluster: the sidebar toggle and navigation stay live.
                     .children(voice_stage)
                     .child(self.render_titlebar_cluster(cx))
+                    .children(self.render_sidebar_options_titlebar(cx))
                     .children(overlays);
                 root.child(sidebar_tone)
                     .child(motion::fade_in("phase-app", page))

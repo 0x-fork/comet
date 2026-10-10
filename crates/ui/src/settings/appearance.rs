@@ -1831,7 +1831,7 @@ impl AppearancePage {
                 let active = family == effective;
                 let focused = family == selected;
                 let label = SharedString::from(family.label().to_owned());
-                widgets::select_row(theme, active, focused, format!("{slug}-font-option-{ix}"))
+                popover::picker_row(theme, active, focused, format!("{slug}-font-option-{ix}"))
                     .id(SharedString::from(format!("{slug}-font-option-{ix}")))
                     .role(gpui::Role::MenuItemRadio)
                     .aria_label(label.clone())
@@ -1849,7 +1849,6 @@ impl AppearancePage {
                     })
                     .when(!available, |row| row.opacity(0.45))
                     .child(div().flex_1().min_w_0().truncate().child(label))
-                    .child(widgets::select_check(theme, active))
                     .into_any_element()
             })
             .collect();
