@@ -293,7 +293,6 @@ pub struct PullRequestsPage {
     query: String,
     repository_input: Entity<ComposerInput>,
     repository: Option<String>,
-    repository_error: Option<String>,
     initial_scope_attempted: bool,
     initial_scope_task: Option<Task<()>>,
     resolving_project: Option<ProjectRef>,
@@ -313,6 +312,8 @@ pub struct PullRequestsPage {
     /// The next page, while it loads; `None` when idle.
     more_task: Option<Task<()>>,
     more_error: Option<PullRequestsPageError>,
+    /// The current refresh failure was already toasted.
+    refresh_error_shown: bool,
     selected_url: Option<String>,
     collapsed_groups: HashSet<PullRequestGroup>,
     /// The virtualized results list and the rows it shows.
@@ -524,8 +525,9 @@ impl PullRequestsPage {
             }
         });
         let repository_input = cx.new(|cx| {
+            // The pickers' search metrics: no override, so the text and
+            // placeholder match every other search row.
             ComposerInput::with_context("owner/repository", "PaletteSearch", cx)
-                .with_text_metrics(12.0, 16.0)
                 .with_single_line()
                 .with_tab_stop()
         });
@@ -539,7 +541,6 @@ impl PullRequestsPage {
                     }
                     ComposerInputEvent::Edited => {
                         page.cancel_project_detection();
-                        page.repository_error = None;
                         cx.notify();
                     }
                     _ => {}
@@ -560,7 +561,6 @@ impl PullRequestsPage {
             query: String::new(),
             repository_input,
             repository: None,
-            repository_error: None,
             initial_scope_attempted: false,
             initial_scope_task: None,
             resolving_project: None,
@@ -572,6 +572,7 @@ impl PullRequestsPage {
             paging: Paging::default(),
             more_task: None,
             more_error: None,
+            refresh_error_shown: false,
             selected_url: None,
             collapsed_groups: HashSet::new(),
             board_list,
@@ -711,7 +712,7 @@ impl PullRequestsPage {
                 if let Some((repo, target)) = found.or(fallback) {
                     page.apply_initial_repository(repo, target, cx);
                 } else if discovery_failed && explicit_context {
-                    page.repository_error = Some("Couldn’t detect this project’s repository. Choose a repository to continue.".into());
+                    crate::toast::error(cx, "Couldn’t detect this project’s repository. Choose a repository to continue.");
                 }
                 cx.notify();
             });
@@ -738,7 +739,6 @@ impl PullRequestsPage {
         self.automatic_filter = true;
         self.initial_scope_task = None;
         self.initial_scope_attempted = false;
-        self.repository_error = None;
         self.reset_for_target(self.target_device.clone(), cx);
     }
 
@@ -763,7 +763,6 @@ impl PullRequestsPage {
             self.initial_scope_task = None;
             self.initial_scope_attempted = false;
             self.load_state = PullRequestsLoadState::Idle;
-            self.repository_error = None;
             self.initialize_repository(cx);
             cx.notify();
         }
@@ -868,11 +867,10 @@ impl PullRequestsPage {
             .trim()
             .to_ascii_lowercase();
         if !valid_repository_filter(&repository) {
-            self.repository_error = Some("Enter a repository as owner/name.".into());
+            crate::toast::error(cx, "Enter a repository as owner/name.");
             cx.notify();
             return;
         }
-        self.repository_error = None;
         self.close_repository_menu(cx);
         self.initial_scope_task = None;
         self.initial_scope_attempted = true;
@@ -925,7 +923,6 @@ impl PullRequestsPage {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         if self.repository.is_none() && self.initial_scope_task.is_none() {
             self.initial_scope_attempted = false;
-            self.repository_error = None;
             self.initialize_repository(cx);
         }
         if !matches!(self.load_state, PullRequestsLoadState::Loading) {
@@ -1003,14 +1000,12 @@ impl PullRequestsPage {
         self.cancel_project_detection();
         let state = self.state.read(cx);
         let Some(engine) = state.engine().cloned() else {
-            self.repository_error =
-                Some("Connect to a device to open its project repository.".into());
+            crate::toast::error(cx, "Connect to a device to open its project repository.");
             cx.notify();
             return;
         };
         if !state.device_online(&device, Utc::now()) {
-            self.repository_error =
-                Some("This device is offline. Reconnect it to open the project.".into());
+            crate::toast::error(cx, "This device is offline. Reconnect it to open the project.");
             cx.notify();
             return;
         }
@@ -1022,7 +1017,6 @@ impl PullRequestsPage {
         let project = ProjectRef { path, device };
         let mut params = params_for_target(target.as_deref());
         params["cwd"] = project.path.clone().into();
-        self.repository_error = None;
         self.initial_scope_attempted = true;
         self.project_repositories.remove(&project);
         self.resolving_project = Some(project.clone());
@@ -1059,7 +1053,7 @@ impl PullRequestsPage {
                         page.return_focus = Some(page.repository_focus.clone());
                         page.apply_initial_repository(repository, target, cx);
                     }
-                    Err(error) => page.repository_error = Some(error.into()),
+                    Err(error) => crate::toast::error(cx, error),
                 }
                 cx.notify();
             });
@@ -1213,7 +1207,6 @@ impl PullRequestsPage {
                     if open {
                         page.close_repository_menu(cx);
                     } else {
-                        page.repository_error = None;
                         page.repository_scroll.reset();
                         page.repository_menu.open(());
                         window.focus(&page.repository_input.read(cx).focus_handle(cx), cx);
@@ -1249,42 +1242,13 @@ impl PullRequestsPage {
                         })
                 })
                 .collect();
-            let mut options = Vec::new();
+            // The project picker's rows: one 32pt line each, artwork and
+            // name. Only checkouts that share a name say where they live.
+            let mut options: Vec<AnyElement> = Vec::new();
             if !projects.is_empty() {
-                let mut group = div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(repository_menu_label(theme, "Projects"));
+                options.push(popover::menu_heading(theme, "Projects").into_any_element());
                 for (name, members) in projects {
                     let multiple = members.len() > 1;
-                    let artwork = self.project_icons.render(
-                        &self.state,
-                        Some(&members[0].0),
-                        profile.clone(),
-                        false,
-                        cx,
-                    );
-                    let mut project_group = div().flex().flex_col().gap(px(2.0));
-                    if multiple {
-                        project_group = project_group.child(
-                            div()
-                                .px(px(8.0))
-                                .pt(px(8.0))
-                                .pb(px(4.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .child(div().size(px(20.0)).flex_none().child(artwork))
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .truncate()
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .child(name.clone()),
-                                ),
-                        );
-                    }
                     for (space, device, online) in members {
                         let project = ProjectRef {
                             path: space.path.clone(),
@@ -1292,39 +1256,20 @@ impl PullRequestsPage {
                         };
                         let selected = self.project_is_selected(&project, local.as_deref());
                         let loading = self.resolving_project.as_ref() == Some(&project);
-                        let repository = self.project_repositories.get(&project);
-                        let primary = if multiple {
-                            device.clone()
-                        } else {
-                            name.clone()
-                        };
-                        let secondary = if loading {
-                            "Finding GitHub repository…".into()
-                        } else if !online {
-                            "Device offline".into()
+                        let detail: Option<SharedString> = if loading {
+                            Some("Finding repository…".into())
                         } else if multiple {
-                            space.path.clone()
+                            Some(device.clone().into())
                         } else {
-                            format!(
-                                "{} · {}",
-                                device,
-                                repository.map(String::as_str).unwrap_or(&space.path)
-                            )
+                            None
                         };
-                        let glyph = if multiple {
-                            icon(icons::LAPTOP)
-                                .size(px(16.0))
-                                .text_color(theme.text_muted)
-                                .into_any_element()
-                        } else {
-                            self.project_icons.render(
-                                &self.state,
-                                Some(&space),
-                                profile.clone(),
-                                selected,
-                                cx,
-                            )
-                        };
+                        let artwork = self.project_icons.render(
+                            &self.state,
+                            Some(&space),
+                            profile.clone(),
+                            selected,
+                            cx,
+                        );
                         let id = format!("pr-project-{}", space.id);
                         let selector = id.clone();
                         let row = popover::picker_row(theme, selected, false, id.clone())
@@ -1338,45 +1283,32 @@ impl PullRequestsPage {
                                 space.path,
                                 if online { "" } else { ", offline" }
                             ))
-                            .focus_visible(|style| style.border_2().border_color(theme.accent))
-                            .min_w_0()
-                            .min_h(px(48.0))
-                            .when(multiple, |row| row.ml(px(16.0)))
+                            .focus_visible(|style| style.border_color(theme.accent))
                             .tooltip(widgets::text_tooltip(format!(
                                 "{name}\n{device}\n{}",
                                 space.path
                             )))
-                            .child(
-                                div()
-                                    .size(px(20.0))
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(glyph),
-                            )
+                            .child(popover::picker_icon_slot(artwork))
                             .child(
                                 div()
                                     .flex_1()
                                     .min_w_0()
                                     .flex()
-                                    .flex_col()
-                                    .gap(px(2.0))
-                                    .child(crate::shell::sidebar_faded_label(
-                                        format!("pr-project-name-{}", space.id).into(),
-                                        false,
-                                        primary,
-                                    ))
-                                    .child(crate::shell::sidebar_faded_label(
-                                        format!("pr-project-path-{}", space.id).into(),
-                                        false,
-                                        div()
-                                            .text_size(crate::typography::ui_rems(11.0))
-                                            .text_color(theme.text_muted)
-                                            .child(secondary),
-                                    )),
+                                    .items_baseline()
+                                    .gap(px(6.0))
+                                    .child(div().flex_none().max_w_full().truncate().child(name.clone()))
+                                    .when_some(detail, |el, detail| {
+                                        el.child(
+                                            div()
+                                                .min_w_0()
+                                                .truncate()
+                                                .text_size(crate::typography::ui_rems(11.0))
+                                                .text_color(theme.text_muted)
+                                                .child(detail),
+                                        )
+                                    }),
                             )
-                            .child(div().size(px(16.0)).flex_none().when(loading, |el| {
+                            .when(loading, |el| {
                                 el.child(crate::loaders::mini_glyph_spinner(
                                     "pr-project-resolving",
                                     1.5,
@@ -1384,7 +1316,16 @@ impl PullRequestsPage {
                                     cx.entity_id(),
                                     cx,
                                 ))
-                            }))
+                            })
+                            // Disconnected glyph, as the device picker shows it.
+                            .when(!loading && !online, |el| {
+                                el.child(
+                                    icon(icons::WIFI_OFF)
+                                        .size(px(12.0))
+                                        .flex_none()
+                                        .text_color(theme.warning.opacity(0.8)),
+                                )
+                            })
                             .on_click(cx.listener(move |page, _, _, cx| {
                                 cx.stop_propagation();
                                 page.select_project(
@@ -1393,24 +1334,22 @@ impl PullRequestsPage {
                                     cx,
                                 );
                             }));
-                        project_group = project_group.child(row);
+                        options.push(row.into_any_element());
                     }
-                    group = group.child(project_group);
                 }
-                options.push(group.into_any_element());
             }
             if !recent.is_empty() {
-                let mut group = div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(repository_menu_label(theme, "Recent repositories"));
+                options.push(
+                    popover::menu_heading(theme, "Recent repositories")
+                        .when(!options.is_empty(), |el| el.pt(px(10.0)))
+                        .into_any_element(),
+                );
                 for repo in recent {
                     let selected = self
                         .repository
                         .as_ref()
                         .is_some_and(|current| current.eq_ignore_ascii_case(&repo));
-                    group = group.child(
+                    options.push(
                         popover::picker_row(theme, selected, false, format!("pr-recent-{repo}"))
                             .id(SharedString::from(format!("pr-recent-{repo}")))
                             .debug_selector(|| "pr-recent-option".into())
@@ -1418,30 +1357,24 @@ impl PullRequestsPage {
                             .aria_selected(selected)
                             .tab_index(0)
                             .aria_label(format!("Open {repo}"))
-                            .focus_visible(|style| style.border_2().border_color(theme.accent))
-                            .min_w_0()
-                            .min_h(px(36.0))
-                            .child(
-                                icon(icons::FOLDER_WITH_FILES)
-                                    .size(px(16.0))
-                                    .flex_none()
-                                    .text_color(theme.text_muted),
-                            )
-                            .child(crate::shell::sidebar_faded_label(
-                                format!("pr-recent-label-{repo}").into(),
-                                true,
-                                repo.clone(),
+                            .focus_visible(|style| style.border_color(theme.accent))
+                            .child(popover::picker_icon_slot(
+                                icon(icons::FOLDER)
+                                    .size(px(14.0))
+                                    .text_color(theme.text_muted)
+                                    .into_any_element(),
                             ))
+                            .child(div().flex_1().min_w_0().truncate().child(repo.clone()))
                             .on_click(cx.listener(move |page, _, _, cx| {
                                 cx.stop_propagation();
                                 page.return_focus = Some(page.repository_focus.clone());
                                 page.repository_input
                                     .update(cx, |input, cx| input.set_text(&repo, cx));
                                 page.select_repository(cx);
-                            })),
+                            }))
+                            .into_any_element(),
                     );
                 }
-                options.push(group.into_any_element());
             }
             let scrollbar = widgets::rail(
                 &mut self.repository_scroll,
@@ -1454,7 +1387,7 @@ impl PullRequestsPage {
                 .id("pr-repository-card")
                 .debug_selector(|| "pr-repository-card".into())
                 .w(px((f32::from(window.viewport_size().width) - 16.0)
-                    .min(344.0)
+                    .min(320.0)
                     .max(240.0)))
                 .flex()
                 .flex_col()
@@ -1486,9 +1419,7 @@ impl PullRequestsPage {
                                 })),
                         ),
                 )
-                .when_some(self.repository_error.clone(), |el, error| {
-                    el.child(div().mb(px(8.0)).child(widgets::error_strip(theme, error)))
-                })
+
                 .when(!options.is_empty(), |el| {
                     el.child(
                         popover::menu_scroll_host("pr-repository-list-host")
@@ -1509,7 +1440,7 @@ impl PullRequestsPage {
                                     .clamp(96.0, 360.0)))
                                 .flex()
                                 .flex_col()
-                                .gap(px(12.0))
+                                .gap(px(popover::MENU_GAP))
                                 .children(options),
                             ))
                             .children(scrollbar),
@@ -1817,6 +1748,7 @@ impl PullRequestsPage {
         }
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             self.more_error = Some(PullRequestsPageError::Network);
+            toast_page_error(&PullRequestsPageError::Network, None, cx);
             cx.notify();
             return;
         };
@@ -1852,7 +1784,11 @@ impl PullRequestsPage {
                         page.view_items = None;
                         page.store_snapshot(page.last_loaded_at.unwrap_or_else(Instant::now));
                     }
-                    Err(error) => page.more_error = Some(map_rpc_error(&error, &target_name)),
+                    Err(error) => {
+                        let error = map_rpc_error(&error, &target_name);
+                        toast_page_error(&error, None, cx);
+                        page.more_error = Some(error);
+                    }
                 }
                 cx.notify();
             })
@@ -1885,10 +1821,6 @@ impl PullRequestsPage {
                 .flex_col()
                 .items_center()
                 .gap(px(Theme::SPACE_SM))
-                .when_some(self.more_error.as_ref(), |el, error| {
-                    let (title, body) = error_copy(error);
-                    el.child(widgets::error_strip(theme, format!("{title}. {body}")))
-                })
                 .child(
                     // A filled, borderless button: the list's own material.
                     widgets::action_button(theme, widgets::ActionTone::Filled)
@@ -2133,8 +2065,8 @@ impl PullRequestsPage {
             )
             .child(
                 div()
-                    .w_full()
-                    .max_w(px(420.0))
+                    .w(px(420.0))
+                    .max_w_full()
                     .text_size(crate::typography::ui_rems(15.0))
                     .line_height(crate::typography::ui_rems(22.0))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -2144,8 +2076,11 @@ impl PullRequestsPage {
             .child(
                 div()
                     .mt(px(6.0))
-                    .w_full()
-                    .max_w(px(420.0))
+                    // A definite width: wrapped text measured against an
+                    // unresolved one lays out a line short, and the second
+                    // line paints over the gap to the action below.
+                    .w(px(420.0))
+                    .max_w_full()
                     .debug_selector(|| "pr-empty-description".into())
                     .text_size(crate::typography::ui_rems(13.0))
                     .line_height(crate::typography::ui_rems(20.0))
@@ -2320,13 +2255,17 @@ impl Render for PullRequestsPage {
             !self.items.is_empty() && matches!(self.load_state, PullRequestsLoadState::Loading);
         let refresh_error =
             !self.items.is_empty() && matches!(self.load_state, PullRequestsLoadState::Failed(_));
-        let refresh_message = match &self.load_state {
-            PullRequestsLoadState::Failed(error) => {
-                let (title, body) = error_copy(error);
-                format!("{title}. {body} Showing the last loaded results.")
+        // A failed refresh keeps the last results on screen and says so
+        // once, as a toast.
+        if refresh_error && !self.refresh_error_shown {
+            if let PullRequestsLoadState::Failed(error) = &self.load_state {
+                let error = error.clone();
+                cx.defer(move |cx| {
+                    toast_page_error(&error, Some("Showing the last loaded results."), cx)
+                });
             }
-            _ => String::new(),
-        };
+        }
+        self.refresh_error_shown = refresh_error;
         let count = (!initial_loading
             && !matches!(self.load_state, PullRequestsLoadState::Failed(_))
             || !self.items.is_empty())
@@ -2450,12 +2389,8 @@ impl Render for PullRequestsPage {
                             .child(self.render_device_switcher(&theme, cx)),
                     ),
             )
-            .when(refresh_error, |el| {
-                el.child(widgets::error_strip(&theme, refresh_message))
-            })
-            .when_some(self.repository_error.clone(), |el, error| {
-                el.child(widgets::error_strip(&theme, error))
-            })
+
+
             .child(
                 div()
                     .mt(px(12.0))
@@ -3479,6 +3414,16 @@ fn repository_menu_label(theme: &Theme, label: &str) -> gpui::Div {
         .text_size(crate::typography::ui_rems(11.0))
 }
 
+/// A page-level failure as a toast: its title and explanation.
+fn toast_page_error(error: &PullRequestsPageError, suffix: Option<&str>, cx: &mut gpui::App) {
+    let (title, body) = error_copy(error);
+    let message = match suffix {
+        Some(suffix) => format!("{title}. {body} {suffix}"),
+        None => format!("{title}. {body}"),
+    };
+    crate::toast::error(cx, message);
+}
+
 fn valid_repository_filter(value: &str) -> bool {
     let parts: Vec<_> = value.split('/').collect();
     parts.len() == 2
@@ -4081,7 +4026,11 @@ mod tests {
                 input.set_text("acme/zeron repo:other/repo", cx)
             });
             page.select_repository(cx);
-            assert!(page.repository_error.is_some());
+            assert!(
+                crate::toast::messages(cx)
+                    .iter()
+                    .any(|message| message.contains("owner/name"))
+            );
             assert_eq!(page.repository.as_deref(), Some("acme/zeron"));
         });
     }
@@ -4282,15 +4231,14 @@ mod tests {
         cx.run_until_parked();
         click("pr-project-scratch", cx);
         rpc.settle(cx, &runtime, |cx| {
-            page.read_with(cx, |page, _| page.repository_error.is_some())
+            page.read_with(cx, |_, cx| !crate::toast::messages(cx).is_empty())
         });
-        page.read_with(cx, |page, _| {
+        page.read_with(cx, |page, cx| {
             assert!(page.repository_menu.is_open());
             assert!(
-                page.repository_error
-                    .as_deref()
-                    .unwrap()
-                    .contains("no GitHub remote")
+                crate::toast::messages(cx)
+                    .iter()
+                    .any(|message| message.contains("no GitHub remote"))
             );
             assert_eq!(page.repository.as_deref(), Some("owner/next"));
         });
@@ -4298,7 +4246,6 @@ mod tests {
             page.repository_input
                 .update(cx, |input, cx| input.set_text("owner/typed", cx))
         });
-        page.read_with(cx, |page, _| assert!(page.repository_error.is_none()));
         // The production menu tracks overflow independently of the board.
         page.update(cx, |page, cx| {
             page.state.update(cx, |state, cx| {
@@ -4396,9 +4343,9 @@ mod tests {
                 page.initial_scope_task.is_none() && page.load_state == PullRequestsLoadState::Ready
             })
         });
-        page.read_with(cx, |page, _| {
+        page.read_with(cx, |page, cx| {
             assert_eq!(page.repository.as_deref(), Some("owner/canonical"));
-            assert!(page.repository_error.is_none());
+            assert!(crate::toast::messages(cx).is_empty());
             assert!(page.target_device.is_none());
         });
         assert_eq!(
@@ -4476,9 +4423,9 @@ mod tests {
         settle(cx);
         // First run, All projects, nothing saved: the newest Git project that
         // is on GitHub, without asking.
-        page.read_with(cx, |page, _| {
+        page.read_with(cx, |page, cx| {
             assert_eq!(page.repository.as_deref(), Some("owner/comet"));
-            assert!(page.repository_error.is_none());
+            assert!(crate::toast::messages(cx).is_empty());
         });
         assert_eq!(*lookups.lock().unwrap(), ["/scratch", "/comet"]);
 
