@@ -2058,7 +2058,7 @@ pub(super) fn compare_sidebar_chats(
 pub(super) struct SpacesMenu {
     search: Entity<ComposerInput>,
     /// Keyboard highlight — an index into [`Shell::spaces_menu_rows`], or
-    /// that list's length when the pinned "New project…" footer holds it.
+    /// that list's length when the pinned "New project" footer holds it.
     active: usize,
     /// Tracked on the card — puts it on the keyboard dispatch path while the
     /// search input holds focus (the structure every working picker uses).
@@ -2261,7 +2261,7 @@ fn sidebar_count_badge(theme: &Theme, count: usize) -> gpui::Div {
 }
 
 /// One activatable row of the open dropdown, in nav order. `AddSpace` names
-/// the card's pinned "New project…" footer, not a list row — keyboard nav
+/// the card's pinned "New project" footer, not a list row — keyboard nav
 /// maps the list-length index to it.
 #[derive(Clone, PartialEq)]
 pub(super) enum SpacesMenuRow {
@@ -3375,7 +3375,7 @@ impl Shell {
     /// the search (ranked — `popover::filter_indices`) — one row per
     /// repository across devices, carrying its local-first checkout's id. "All"
     /// only shows on an empty query (searching means hunting a project). The
-    /// "New project…" action is not a row here — the card renders it as a
+    /// "New project" action is not a row here — the card renders it as a
     /// pinned footer.
     fn spaces_menu_rows(&self, cx: &App) -> Vec<SpacesMenuRow> {
         let query = self
@@ -4315,7 +4315,7 @@ impl Shell {
     }
 
     /// The dropdown card: search on top, "All projects" + space rows (check on
-    /// the active filter; right-click for rename/remove) + "New project…".
+    /// the active filter; right-click for rename/remove) + "New project".
     fn render_spaces_menu(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let theme = &theme.for_popup();
         let (search, active, focus, list_scroll) = {
@@ -4487,7 +4487,7 @@ impl Shell {
                     // Same 2px rhythm as the composer project menu.
                     .gap(px(2.0))
                     .child(list)
-                    // "New project…" is a pinned action row under the list
+                    // "New project" is a pinned action row under the list
                     // (the chat composer's project menu treatment) —
                     // scrolling must never carry it away, and its nav index
                     // (`add_index`) keeps it LAST.
@@ -4514,7 +4514,7 @@ impl Shell {
                                 .flex_1()
                                 .min_w_0()
                                 .truncate()
-                                .child(SharedString::from("New project…")),
+                                .child(SharedString::from("New project")),
                         ),
                     ),
             )

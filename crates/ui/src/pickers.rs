@@ -2760,7 +2760,7 @@ impl Pickers {
     }
 
     /// The project popover: search + one row per project across devices
-    /// (check on the current pick), then "New project…" and the opt-out rows.
+    /// (check on the current pick), then "New project" and the opt-out rows.
     /// No per-row `@ device` tag — the device chip next door picks the host.
     fn render_space_popover(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::of(cx).for_popup();
@@ -2891,7 +2891,7 @@ impl Pickers {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .child(SharedString::from("New project…")),
+                    .child(SharedString::from("New project")),
             );
         div()
             .flex()
